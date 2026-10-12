@@ -1,19 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../App';
-import { User as UserIcon, Loader2, Check, ArrowRight, Camera, X } from 'lucide-react';
+import { User as UserIcon, Loader2, Check, ArrowRight, Camera, X, Image as ImageIcon, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ref, uploadBytes, getDownloadURL, storage } from '../firebase';
 
-const AVATARS = {
-  boy: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
-  girl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka',
-};
-
 export function ProfileSetup() {
   const { updateProfile, firebaseUser } = useAuth();
-  const [step, setStep] = useState<'name' | 'gender'>('name');
+  const [step, setStep] = useState<'name' | 'photo'>('name');
   const [name, setName] = useState(firebaseUser?.displayName || '');
-  const [gender, setGender] = useState<'boy' | 'girl' | null>(null);
   const [loading, setLoading] = useState(false);
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -26,12 +20,25 @@ export function ProfileSetup() {
 
     setUploading(true);
     try {
-      const storageRef = ref(storage, `profiles/${firebaseUser.uid}/${file.name}`);
+      // Create local preview immediately for fast feedback
+      const localUrl = URL.createObjectURL(file);
+      setCustomPhotoURL(localUrl);
+
+      // Upload to Firebase Storage in background
+      const storageRef = ref(storage, `profiles/${firebaseUser.uid}/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const downloadURL = await getDownloadURL(storageRef);
       setCustomPhotoURL(downloadURL);
     } catch (error) {
-      console.error('Error uploading profile pic:', error);
+      console.warn('Upload error, using local/data preview if available:', error);
+      // Fallback: read as data URL so it still works even if storage rules/network fail
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setCustomPhotoURL(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
     } finally {
       setUploading(false);
     }
@@ -42,19 +49,22 @@ export function ProfileSetup() {
     const trimmedName = name.trim();
     const nameParts = trimmedName.split(/\s+/).filter(part => part.length > 0);
     if (nameParts.length >= 2) {
-      setStep('gender');
+      setStep('photo');
     } else {
       setNameError('Por favor, insira seu nome e sobrenome para facilitar a busca de contatos.');
     }
   };
 
-  const handleSubmit = async (selectedGender: 'boy' | 'girl' | 'custom') => {
+  const handleSubmit = async (photo: string | null) => {
     if (!name.trim()) return;
     
     setLoading(true);
     try {
-      const photoURL = selectedGender === 'custom' ? customPhotoURL : AVATARS[selectedGender as 'boy' | 'girl'];
-      await updateProfile({ name, photoURL: photoURL || AVATARS.boy });
+      // If photo is null, it saves as null (using the standard simple contact icon throughout the app)
+      await updateProfile({ 
+        name: name.trim(), 
+        photoURL: photo || null 
+      });
     } catch (error) {
       console.error('Error setting up profile:', error);
     } finally {
@@ -65,6 +75,8 @@ export function ProfileSetup() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#111b21] p-6 text-white font-sans">
       <AnimatePresence mode="wait">
+        
+        {/* PASSO 1: NOME COMPLETO */}
         {step === 'name' ? (
           <motion.div
             key="name"
@@ -74,11 +86,11 @@ export function ProfileSetup() {
             className="w-full max-w-md space-y-8 text-center"
           >
             <div className="flex flex-col items-center">
-              <div className="mb-8 flex h-24 w-24 items-center justify-center rounded-full bg-[#202c33] text-[#8696a0]">
-                <UserIcon className="h-12 w-12" />
+              <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-[#00a884] p-3 shadow-xl shadow-[#00a884]/20">
+                <img src="/icon.svg" alt="OffGrid" className="h-full w-full object-contain" />
               </div>
               <h2 className="mb-2 text-3xl font-bold">Qual o seu nome?</h2>
-              <p className="text-[#8696a0]">Insira seu nome para que seus amigos possam te reconhecer.</p>
+              <p className="text-[#8696a0] text-sm">Insira seu nome e sobrenome para que seus contatos possam te reconhecer.</p>
             </div>
 
             <div className="relative">
@@ -101,102 +113,136 @@ export function ProfileSetup() {
             <button
               onClick={handleNext}
               disabled={!name.trim()}
-              className="flex w-full items-center justify-center gap-3 rounded-full bg-[#00a884] py-4 text-lg font-bold text-[#111b21] transition-transform active:scale-95 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-3 rounded-full bg-[#00a884] py-4 text-base font-bold text-[#111b21] transition-transform active:scale-95 disabled:opacity-50 hover:bg-[#009272]"
             >
-              Próximo
+              <span>Avançar para foto</span>
               <ArrowRight className="h-5 w-5" />
             </button>
           </motion.div>
         ) : (
+          
+          /* PASSO 2: FOTO DO PERFIL (OU FOTO SIMPLES DE CONTATO) */
           <motion.div
-            key="gender"
+            key="photo"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="w-full max-w-md space-y-8 text-center"
+            className="w-full max-w-md space-y-6 text-center"
           >
             <div className="flex flex-col items-center">
-              <h2 className="mb-2 text-3xl font-bold">Você é...</h2>
-              <p className="text-[#8696a0]">Escolha uma opção para definir seu avatar automaticamente.</p>
+              <h2 className="mb-2 text-2xl sm:text-3xl font-bold">Foto do Perfil</h2>
+              <p className="text-[#8696a0] text-sm max-w-xs">
+                Selecione uma foto sua ou continue com a foto simples padrão de contato.
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
-              <button
-                onClick={() => handleSubmit('boy')}
-                disabled={loading || uploading}
-                className="group flex flex-col items-center gap-4 rounded-3xl bg-[#202c33] p-8 transition-all hover:bg-[#2a3942] active:scale-95"
-              >
-                <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[#111b21] border-2 border-transparent group-hover:border-[#00a884]">
-                  <img src={AVATARS.boy} alt="Menino" className="h-full w-full object-cover" />
-                </div>
-                <span className="text-xl font-bold">Menino</span>
-              </button>
-
-              <button
-                onClick={() => handleSubmit('girl')}
-                disabled={loading || uploading}
-                className="group flex flex-col items-center gap-4 rounded-3xl bg-[#202c33] p-8 transition-all hover:bg-[#2a3942] active:scale-95"
-              >
-                <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[#111b21] border-2 border-transparent group-hover:border-[#00a884]">
-                  <img src={AVATARS.girl} alt="Menina" className="h-full w-full object-cover" />
-                </div>
-                <span className="text-xl font-bold">Menina</span>
-              </button>
-            </div>
-
-            <div className="mt-8">
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                className="hidden" 
-                accept="image/*"
-              />
-              {customPhotoURL ? (
-                <div className="flex flex-col items-center gap-4">
-                  <div className="relative h-32 w-32 rounded-full border-4 border-[#00a884] overflow-hidden">
-                    <img src={customPhotoURL} alt="Custom" className="h-full w-full object-cover" />
-                    <button 
-                      onClick={() => setCustomPhotoURL(null)}
-                      className="absolute top-0 right-0 bg-red-500 p-1 rounded-full"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+            {/* Avatar Preview */}
+            <div className="relative mx-auto my-2 group flex flex-col items-center justify-center">
+              <div className="relative h-36 w-36 overflow-hidden rounded-full border-4 border-[#00a884] bg-[#202c33] shadow-2xl flex items-center justify-center">
+                {uploading ? (
+                  <Loader2 className="h-10 w-10 animate-spin text-[#00a884]" />
+                ) : customPhotoURL ? (
+                  <img
+                    src={customPhotoURL}
+                    alt="Foto do Perfil"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  /* Foto simples clássica de contato */
+                  <div className="flex flex-col items-center justify-center text-[#8696a0]">
+                    <UserIcon className="h-20 w-20 stroke-[1.5]" />
                   </div>
+                )}
+
+                {/* Remove photo button if custom chosen */}
+                {customPhotoURL && !uploading && (
                   <button
-                    onClick={() => handleSubmit('custom')}
-                    disabled={loading}
-                    className="rounded-full bg-[#00a884] px-8 py-3 font-bold text-[#111b21]"
+                    type="button"
+                    onClick={() => setCustomPhotoURL(null)}
+                    className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white shadow-md hover:bg-red-600 transition"
+                    title="Remover foto e usar padrão"
                   >
-                    Usar esta foto
+                    <X className="h-4 w-4" />
                   </button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="flex items-center gap-2 mx-auto text-[#00a884] font-bold"
+                )}
+              </div>
+
+              {/* Status indicator below avatar */}
+              <p className="mt-3 text-xs text-[#8696a0]">
+                {customPhotoURL 
+                  ? 'Foto personalizada selecionada' 
+                  : 'Foto simples padrão de contato ativa'}
+              </p>
+            </div>
+
+            {/* Input file escondido */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              accept="image/*"
+            />
+
+            {/* Ações para a foto */}
+            <div className="space-y-3 pt-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || loading}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#202c33] border border-[#2a3942] py-3.5 text-sm font-bold text-white hover:bg-[#2a3942] transition active:scale-95 disabled:opacity-50"
+              >
+                {uploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-[#00a884]" />
+                ) : (
+                  <Camera className="h-5 w-5 text-[#00a884]" />
+                )}
+                <span>{customPhotoURL ? 'Trocar de Foto' : 'Escolher Foto da Galeria / Câmera'}</span>
+              </button>
+
+              {/* Botão de Salvar Perfil com a foto ou simples */}
+              <button
+                type="button"
+                onClick={() => handleSubmit(customPhotoURL)}
+                disabled={loading || uploading}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#00a884] py-4 text-base font-bold text-[#111b21] shadow-lg hover:bg-[#009272] transition active:scale-95 disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <Check className="h-5 w-5" />
+                    <span>{customPhotoURL ? 'Salvar com esta foto' : 'Continuar com foto simples de contato'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* Se o usuário tiver selecionado uma foto, permite ainda salvar sem foto */}
+              {customPhotoURL && (
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(null)}
+                  disabled={loading}
+                  className="text-xs text-[#8696a0] hover:text-white transition py-1 underline underline-offset-4"
                 >
-                  {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
-                  Ou escolha uma foto personalizada
+                  Continuar sem foto (usar foto simples de contato)
                 </button>
               )}
             </div>
 
-            {loading && (
-              <div className="flex justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-[#00a884]" />
-              </div>
-            )}
-
-            <button
-              onClick={() => setStep('name')}
-              className="text-sm font-medium text-[#8696a0] hover:text-white"
-            >
-              Voltar
-            </button>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setStep('name')}
+                disabled={loading}
+                className="text-xs text-[#8696a0] hover:text-white transition"
+              >
+                ← Voltar para alterar o nome
+              </button>
+            </div>
           </motion.div>
         )}
+
       </AnimatePresence>
     </div>
   );
